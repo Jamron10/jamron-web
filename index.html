@@ -1,59 +1,172 @@
-<!DOCTYPE html><html lang="ru">
+// index.js — майнинг бот (бот + сервер + фронт в одном файле)
+
+// === DEPENDENCIES ===
+import express from "express";
+import mongoose from "mongoose";
+import TelegramBot from "node-telegram-bot-api";
+import cors from "cors";
+import path from "path";
+import { fileURLToPath } from "url";
+
+// === CONFIG ===
+const TOKEN = "YOUR_TELEGRAM_BOT_TOKEN";
+const MONGO_URI = "mongodb://localhost:27017/miningbot";
+const PORT = 3000;
+const WEBAPP_URL = "http://localhost:3000";
+
+// === INIT ===
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// === DB ===
+const userSchema = new mongoose.Schema({
+  telegramId: { type: Number, unique: true },
+  username: String,
+  balance: { type: Number, default: 0 },
+  mining: { type: Number, default: 0 },
+  dailyBonus: { type: Date, default: null },
+  registeredAt: { type: Date, default: Date.now },
+});
+
+const User = mongoose.model("User", userSchema);
+
+// === TELEGRAM BOT ===
+const bot = new TelegramBot(TOKEN, { polling: true });
+
+bot.onText(/\/start/, async (msg) => {
+  const chatId = msg.chat.id;
+  let user = await User.findOne({ telegramId: chatId });
+  if (!user) {
+    user = await User.create({
+      telegramId: chatId,
+      username: msg.from.username,
+    });
+  }
+
+  bot.sendMessage(
+    chatId,
+    `Привет, ${msg.from.first_name}! 🚀 Добро пожаловать в майнинг-бот!`,
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: "Открыть майнинг",
+              web_app: { url: `${WEBAPP_URL}/app?uid=${chatId}` },
+            },
+          ],
+        ],
+      },
+    }
+  );
+});
+
+// === API ===
+app.get("/api/user/:id", async (req, res) => {
+  const user = await User.findOne({ telegramId: req.params.id });
+  res.json(user);
+});
+
+app.post("/api/collect", async (req, res) => {
+  const { id } = req.body;
+  const user = await User.findOne({ telegramId: id });
+  if (!user) return res.status(404).json({ error: "User not found" });
+
+  user.balance += user.mining;
+  user.mining = 0;
+  await user.save();
+
+  res.json(user);
+});
+
+app.post("/api/bonus", async (req, res) => {
+  const { id } = req.body;
+  const user = await User.findOne({ telegramId: id });
+  if (!user) return res.status(404).json({ error: "User not found" });
+
+  const today = new Date().toDateString();
+  if (user.dailyBonus && new Date(user.dailyBonus).toDateString() === today) {
+    return res.json({ error: "Бонус уже получен сегодня!" });
+  }
+
+  user.balance += 0.51;
+  user.dailyBonus = new Date();
+  await user.save();
+
+  res.json(user);
+});
+
+// === FRONTEND (WEBAPP) ===
+app.get("/app", (req, res) => {
+  res.sendFile(path.join(__dirname, "index.html"));
+});
+
+app.get("/index.html", (req, res) => {
+  res.send(`<!DOCTYPE html>
+<html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Jamron — Разработчик ботов</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mining Bot</title>
+  <style>
+    body { background:#111; color:#fff; font-family:Arial; text-align:center; }
+    .card { max-width:400px; margin:20px auto; background:#222; padding:20px; border-radius:15px; }
+    .btn { display:inline-block; padding:10px 20px; margin:5px; border:none; border-radius:10px; cursor:pointer; }
+    .btn-green { background:#28a745; color:#fff; }
+    .btn-blue { background:#007bff; color:#fff; }
+    .progress { height:10px; background:#333; border-radius:5px; overflow:hidden; }
+    .progress-bar { height:10px; background:#28a745; width:0%; }
+  </style>
 </head>
-<body class="bg-gray-900 text-white font-sans">
-  <div class="max-w-lg mx-auto p-6 space-y-6">
-    <!-- Header -->
-    <div class="text-center">
-      <h1 class="text-3xl font-bold">🥳 Привет! Я — JAMRON</h1>
-      <p class="text-gray-400">Разработчик Telegram-ботов</p>
-    </div><!-- Price list -->
-<div class="bg-gray-800 rounded-2xl p-4 shadow">
-  <h2 class="text-xl font-semibold mb-2">📋 Прайс-лист</h2>
-  <ul class="space-y-1">
-    <li>👥 Реферальный бот — <span class="font-bold">4$</span></li>
-    <li>🏀 Игра «Попадание» — <span class="font-bold">6$</span></li>
-    <li>⛏ Майнер бот — <span class="font-bold">10$</span></li>
-    <li>🎰 Казино бот — <span class="font-bold">15$</span></li>
-    <li>🤖 CREATOR (auto start) — <span class="font-bold">20$</span></li>
-    <li>✨ Другое — от <span class="font-bold">5$</span></li>
-  </ul>
-</div>
-
-<!-- Learning -->
-<div class="bg-gray-800 rounded-2xl p-4 shadow">
-  <h2 class="text-xl font-semibold mb-2">📚 Обучение</h2>
-  <p>Как сделать ботов: от <span class="font-bold">10$</span> (зависит от категории)</p>
-</div>
-
-<!-- Services -->
-<div class="bg-gray-800 rounded-2xl p-4 shadow">
-  <h2 class="text-xl font-semibold mb-2">⬆️ Доп. услуги</h2>
-  <ul class="space-y-1">
-    <li>Удаление канала — 2$</li>
-    <li>Тестовый сервер — бесплатно (1 день)</li>
-    <li>Далее — 3$/мес</li>
-    <li class="text-sm text-gray-400">Бот удаляется, если сервер не оплачен 2 дня</li>
-  </ul>
-</div>
-
-<!-- Payment -->
-<div class="bg-gray-800 rounded-2xl p-4 shadow">
-  <h2 class="text-xl font-semibold mb-2">💸 Способы оплаты</h2>
-  <p>TON 💎, CryptoBot 👛, Xrocket 🚀,<br>МИР 💸, USDT 🤑, Cwallet 👛, VISA 🇦🇲</p>
-</div>
-
-<!-- Contacts -->
-<div class="bg-gray-800 rounded-2xl p-4 shadow text-center">
-  <h2 class="text-xl font-semibold mb-2">📞 Как заказать</h2>
-  <p>Пиши: <a href="https://t.me/JamronProg" class="text-blue-400 underline">@JamronProg</a></p>
-  <a href="https://t.me/JamronProg" class="inline-block mt-4 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-2xl font-bold shadow">Заказать бота</a>
-</div>
-
+<body>
+  <div class="card">
+    <h2>🚀 Майнинг бот</h2>
+    <p id="mining">Загрузка...</p>
+    <div class="progress"><div id="progress" class="progress-bar"></div></div>
+    <p id="balance">Баланс: 0 ₽</p>
+    <button class="btn btn-green" onclick="collect()">✅ Собрать</button>
+    <button class="btn btn-blue" onclick="bonus()">🎁 Бонус</button>
   </div>
+  <script>
+    const tg = window.Telegram?.WebApp;
+    const urlParams = new URLSearchParams(window.location.search);
+    const uid = urlParams.get("uid");
+
+    async function loadUser() {
+      const res = await fetch('/api/user/' + uid);
+      const user = await res.json();
+      document.getElementById('mining').innerText = 'Накопления: ' + user.mining.toFixed(6) + ' ₽';
+      document.getElementById('balance').innerText = 'Баланс: ' + user.balance.toFixed(4) + ' ₽';
+      document.getElementById('progress').style.width = ((user.mining % 1) * 100) + '%';
+    }
+
+    async function collect() {
+      await fetch('/api/collect', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:uid}) });
+      loadUser();
+    }
+
+    async function bonus() {
+      await fetch('/api/bonus', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:uid}) });
+      loadUser();
+    }
+
+    loadUser();
+    setInterval(loadUser, 5000);
+  </script>
 </body>
-</html>
+</html>`);
+});
+
+// === SERVER ===
+(async () => {
+  await mongoose.connect(MONGO_URI);
+  console.log("MongoDB connected");
+
+  app.listen(PORT, () =>
+    console.log(`Server running on http://localhost:${PORT}`)
+  );
+})();
